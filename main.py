@@ -1,14 +1,14 @@
 import argparse
-import numpy as np  # noqa
-import matplotlib.pyplot as plt  # noqa
-
-# todo: plot covariance
-# todo: compare before optimization to after that.
+import numpy as np
+import matplotlib.pyplot as plt
 
 
-def infer():
+def infer(mode, iter_size=20):
     """
-    カーネル関数のパラメータを最適化した上で, 推論する.
+    Infer y from x by using gaussian processes with {mode} kernel, after optimizing the kernel parameters.
+
+    Args:
+        - mode: strings. specifying the kernel type from 'dnn' or 'rbf'.
     """
     # data
     N = 100
@@ -17,7 +17,6 @@ def infer():
     M = 200
     x_new = np.linspace(0, 100, M)
     # initialize and optimize kernel
-    mode = 'dnn'
     if mode == 'rbf':
         initial_param = [2, 2, 2]
         jump_limit = [[0.01, 100], [0.01, 100], [0.01, 100]]
@@ -28,12 +27,11 @@ def infer():
         kernel = DnnKernel(initial_param, jump_limit)
     print('optimizing kernel paramters...')
     mcmc = MetroPolice()
-    # todo: iter_sizeを100に
-    kernel.optimize(x, y, mcmc, log_likelihood, iter_size=10)
+    kernel.optimize(x, y, mcmc, log_likelihood, iter_size=iter_size)
     print('done.')
     print('optimized param:', kernel.param)
     # predict
-    print('calculate inverse matrix...')
+    print('calculating inverse matrix...')
     mu = np.zeros((M))
     sigma2 = np.zeros((M))
     k00 = calc_kernel_matrix(x, kernel)
@@ -44,8 +42,13 @@ def infer():
         mu[m] = np.dot(np.dot(k10.T, k00_inv), y)
         sigma2[m] = sigma2_y + kernel(x_new[m], x_new[m]) - np.dot(np.dot(k10.T, k00_inv), k10)
     print('done.')
-    plt.plot(x_new, mu, marker='o', color='blue')
-    plt.plot(x, y, marker='o', color='green')
+    plt.plot(x_new, mu, marker='o', color='green', ms=4, ls='-', label='predicted values')
+    plt.fill_between(x_new, mu-sigma2, mu+sigma2, alpha=0.5, color='green')
+    plt.plot(x, y, marker='o', color='blue', ms=4, ls='-', label='teacher values')
+    plt.legend()
+    plt.title(f'Inference result of gaussian processes with {mode} kernel.')
+    plt.xlabel('x')
+    plt.ylabel('y')
     plt.show()
 
 
@@ -89,7 +92,8 @@ class Kernel(object):
 
     def optimize(self, x: np.ndarray, y: np.ndarray, mcmc: MCMC, log_likelihood: 'log_likelihood', iter_size: int = 1000):
         mcmc(x, y, self, log_likelihood, iter_size)
-        self.param = np.exp(mcmc.params[np.argmax(mcmc.probs)])
+        if len(mcmc.probs):
+            self.param = np.exp(mcmc.params[np.argmax(mcmc.probs)])
 
 
 class MetroPolice(MCMC):
@@ -128,7 +132,6 @@ class MetroPolice(MCMC):
                 param, prob = new_param, new_prob
                 self.params.append(param)
                 self.probs.append(prob)
-            print(f'iter: {i}')
             if i > 0 and i % 5 == 0:
                 print(f'iter: {i}/{iter_size}')
         print('done.')
@@ -165,10 +168,9 @@ class DnnKernel(Kernel):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Initialize trainning parameters.')
-    parser.add_argument('-mode', type=str, help='you can choose kernel mode from "dnn" or "rbf". Default is dnn kernel.')
+    parser = argparse.ArgumentParser(description='Initialize trainning parameters which are "mode" and "iter_size".')
+    parser.add_argument('-mode', type=str, default='dnn', help='you can choose kernel mode from "dnn" or "rbf". Default is "dnn".')
+    parser.add_argument('-iter_size', type=int, default=100, help='iter size of mcmc.')
     args = parser.parse_args()
-    if args.mode:
-        assert args.mode in ['dnn', 'rbf'], f'{args.mode} mode is not implemented. please choose from "dnn" or "rbf"'
-    mode = args.mode if args.mode else 'dnn'
-    infer()
+    assert args.mode in ['dnn', 'rbf'], f'{args.mode} mode is not implemented. please choose from "dnn" or "rbf"'
+    infer(args.mode, args.iter_size)
